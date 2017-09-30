@@ -11,7 +11,7 @@ app = Flask(__name__)
 api = Api(app)
 
 STATISTICS = {}
-RETURN_TRANSACTIONS = {
+RET_TRANSACTIONS = {
     'sum': 0,
     'avg': 0,
     'max': 0,
@@ -20,8 +20,9 @@ RETURN_TRANSACTIONS = {
 }
 START_TIME = datetime.datetime.now()
 
-def hello():
-    print('hello')
+def datetime_to_mili(dt):
+    epoch = datetime.datetime.utcfromtimestamp(0)
+    return (dt - epoch).total_seconds() * 1000.0
 
 def subtract_sec(timestamp, time_now):
     dt_timestamp = datetime.datetime.fromtimestamp(timestamp/1000.)
@@ -31,18 +32,16 @@ def subtract_sec(timestamp, time_now):
     return int(secs)
 
 def count():
-    epoch = datetime.datetime.utcfromtimestamp(0)
     prev = datetime.datetime.now()
     now = datetime.datetime.now()
     diff = prev - now
 
-    print('hello!')
     # wait until time difference = 1
     while (diff.total_seconds() < 60):
         now = datetime.datetime.now()
         diff = prev - now
 
-    mili_now = (now - epoch).total_seconds() * 1000.0
+    now = datetime_to_mili(now)
 
     if now in STATISTICS:
         stat = STATISTICS[now]
@@ -53,17 +52,21 @@ def count():
         min_stat = stat['min']
         count_stat = stat['count']
 
-        sum_ret = RETURN_TRANSACTIONS['sum']
-        max_ret = RETURN_TRANSACTIONS['max']
-        min_ret = RETURN_TRANSACTIONS['min']
-        count_ret = RETURN_TRANSACTIONS['count']
+        sum_ret = RET_TRANSACTIONS['sum']
+        max_ret = RET_TRANSACTIONS['max']
+        min_ret = RET_TRANSACTIONS['min']
+        count_ret = RET_TRANSACTIONS['count']
 
         # remove data from return transactions
-        RETURN_TRANSACTIONS['sum'] = sum_ret - sum_stat
-        RETURN_TRANSACTIONS['avg'] = (sum_ret - sum_stat) / count_ret
-        RETURN_TRANSACTIONS['max'] = max(max_ret, max_stat)
-        RETURN_TRANSACTIONS['min'] = min(min_ret, min_stat)
-        RETURN_TRANSACTIONS['count'] = count_ret - count_stat
+        RET_TRANSACTIONS['sum'] = sum_ret - sum_stat
+        RET_TRANSACTIONS['avg'] = (sum_ret - sum_stat) / count_ret
+        RET_TRANSACTIONS['max'] = max(max_ret, max_stat)
+        RET_TRANSACTIONS['min'] = min(min_ret, min_stat)
+        RET_TRANSACTIONS['count'] = count_ret - count_stat
+
+# executor = ThreadPoolExecutor(4)
+# executor.submit(count)
+
 
 class Transactions(Resource):
     def put(self):
@@ -82,7 +85,7 @@ class Transactions(Resource):
                 'count': 1
             }
         else:
-            sum_stat = STATISTICS[timestamp]['amount'] + amount
+            sum_stat = STATISTICS[timestamp]['sum'] + amount
             count = STATISTICS[timestamp]['count']
 
             STATISTICS[timestamp] = {
@@ -93,21 +96,21 @@ class Transactions(Resource):
                 'count': count
             }
 
-        if RETURN_TRANSACTIONS['count'] != 0:
-            count = RETURN_TRANSACTIONS['count']
-            sum_ret = RETURN_TRANSACTIONS['sum']
+        if RET_TRANSACTIONS['count'] != 0:
+            count = RET_TRANSACTIONS['count']
+            sum_ret = RET_TRANSACTIONS['sum']
 
-            RETURN_TRANSACTIONS['sum'] = amount
-            RETURN_TRANSACTIONS['avg'] = (sum_ret + amount) / count
-            RETURN_TRANSACTIONS['max'] = max(RETURN_TRANSACTIONS['max'], amount)
-            RETURN_TRANSACTIONS['min'] = min(RETURN_TRANSACTIONS['min'], amount)
-            RETURN_TRANSACTIONS['count'] = count + 1
+            RET_TRANSACTIONS['sum'] = amount
+            RET_TRANSACTIONS['avg'] = (sum_ret + amount) / count
+            RET_TRANSACTIONS['max'] = max(RET_TRANSACTIONS['max'], amount)
+            RET_TRANSACTIONS['min'] = min(RET_TRANSACTIONS['min'], amount)
+            RET_TRANSACTIONS['count'] = count + 1
         else:
-            RETURN_TRANSACTIONS['sum'] = amount
-            RETURN_TRANSACTIONS['avg'] = amount
-            RETURN_TRANSACTIONS['max'] = amount
-            RETURN_TRANSACTIONS['min'] = amount
-            RETURN_TRANSACTIONS['count'] = 1
+            RET_TRANSACTIONS['sum'] = amount
+            RET_TRANSACTIONS['avg'] = amount
+            RET_TRANSACTIONS['max'] = amount
+            RET_TRANSACTIONS['min'] = amount
+            RET_TRANSACTIONS['count'] = 1
 
         if (sec > 60):
             return '', 204
@@ -118,14 +121,31 @@ class Transactions(Resource):
 class Statistics(Resource):
     def get(self):
         start = datetime.datetime.now()
-        end = start + datetime.timedelta(minutes=1)
+        end = start - datetime.timedelta(minutes=1)
 
-        return jsonify(RETURN_TRANSACTIONS)
+        for time_mili, data in STATISTICS.items():
+            converted_time = datetime.datetime.fromtimestamp(time_mili/1000.)
+
+            if converted_time < end:
+                sum_ret = RET_TRANSACTIONS['sum']
+                count_ret = RET_TRANSACTIONS['count']
+                max_ret = RET_TRANSACTIONS['max']
+                min_ret = RET_TRANSACTIONS['min']
+
+                sum_data = data['sum']
+                count_data = data['count']
+
+                RET_TRANSACTIONS['sum'] = sum_data + sum_ret
+                RET_TRANSACTIONS['avg'] = (sum_data + sum_ret) / (count_ret + count_data)
+                RET_TRANSACTIONS['max'] = max(max_ret, data['max'])
+                RET_TRANSACTIONS['min'] = min(min_ret, data['min'])
+                RET_TRANSACTIONS['count'] = count_ret + count_data
+
+        return jsonify(RET_TRANSACTIONS)
+
 
 api.add_resource(Transactions, '/transactions')
 api.add_resource(Statistics, '/statistics')
 
 if __name__ == '__main__':
-    executor = ThreadPoolExecutor(4)
-    executor.submit(count)
     app.run(port='5000', debug=True)
