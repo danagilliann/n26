@@ -1,4 +1,0 @@
-CREATE TABLE statistics (
-amount double,
-sec double
-);
